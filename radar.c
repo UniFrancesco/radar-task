@@ -19,7 +19,7 @@
 #define WHITE 15	// white color
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
-#define MAXT 50    // max number of balls tasks
+#define MAXT 25    // max number of balls tasks
 #define LEN 80    // max message length
 #define PER 20    // base period
 #define PERRADAR 5    // base period
@@ -221,13 +221,48 @@ void draw_arrow(int x1, int y1, int x2, int y2, int c){
 }
 
 //------------------------------------------------------------------------------
-// BALL_TASK: task that handles the ball movements
+// UPDATE_BALL_POSITION: updates position of ball i using parameter dt as time
+// passed
 //------------------------------------------------------------------------------
-void ball_task() {
+void update_ball_position(int i, float dt){
 	double ax, ay;		// acceleration
 	double vel_modulus;
 	double vel_modulus_after;
 	double alpha;		//angle
+	vel_modulus = sqrt(ball[i].vx * ball[i].vx + ball[i].vy * ball[i].vy);
+	alpha = asin(ball[i].vy/vel_modulus); //direction of speed vector
+	ax = ball[i].ac * cos(alpha + PI/2); // banking
+	ay = ball[i].ac * sin(alpha + PI/2);
+
+	ball[i].vx += ax*dt;
+	ball[i].vy += ay*dt;
+	vel_modulus_after = sqrt(ball[i].vx * ball[i].vx + ball[i].vy
+	 * ball[i].vy);
+	ball[i].vx *= vel_modulus/vel_modulus_after; 
+	ball[i].vy *= vel_modulus/vel_modulus_after;
+	ax = ball[i].al*cos(alpha);   //longitudinal acceleration
+	ay = ball[i].al*sin(alpha);
+	ball[i].vx += ax*dt;
+	ball[i].vy += ay*dt;
+	ball[i].x_old = ball[i].x;
+	ball[i].y_old = ball[i].y;
+	ball[i].x += ball[i].vx*dt;
+	ball[i].y += ball[i].vy*dt;
+	float dist = distance(ball[i].x,ball[i].y,YWIN/2,YWIN/2);
+
+	if (dist > RR) {
+		ball[i].out_of_radar = TRUE;
+		clear_ball(i);
+	}
+	else draw_ball(i);
+	ptask_wait_for_period(i);
+	
+}
+
+//------------------------------------------------------------------------------
+// BALL_TASK: task that handles all the balls movement after getting the period
+//------------------------------------------------------------------------------
+void ball_task() {
 	int i; 		// task index
 	i = ptask_get_index();
 	float dt; 		// integration interval
@@ -235,54 +270,20 @@ void ball_task() {
 
 	init_ball(i, dt);
 
-	while (!end && !ball[i].out_of_radar) {
-		vel_modulus = sqrt(ball[i].vx * ball[i].vx + ball[i].vy * ball[i].vy);
-		alpha = asin(ball[i].vy/vel_modulus); //direction of speed vector
-
-		ax = ball[i].ac * cos(alpha + PI/2); // banking
-		ay = ball[i].ac * sin(alpha + PI/2);
-
-		ball[i].vx += ax*dt;
-		ball[i].vy += ay*dt;
-
-		vel_modulus_after = sqrt(ball[i].vx * ball[i].vx + ball[i].vy
-		 * ball[i].vy);
-
-		ball[i].vx *= vel_modulus/vel_modulus_after; 
-		ball[i].vy *= vel_modulus/vel_modulus_after;
-
-		ax = ball[i].al*cos(alpha);   //longitudinal acceleration
-		ay = ball[i].al*sin(alpha);
-
-		ball[i].vx += ax*dt;
-		ball[i].vy += ay*dt;
-
-		ball[i].x_old = ball[i].x;
-		ball[i].y_old = ball[i].y;
-		ball[i].x += ball[i].vx*dt;
-		ball[i].y += ball[i].vy*dt;
-
-		float dist = distance(ball[i].x,ball[i].y,YWIN/2,YWIN/2);
-
-		if (dist > RR) {
-			ball[i].out_of_radar = TRUE;
-			clear_ball(i);
-		}
-		else draw_ball(i);
-		ptask_wait_for_period(i);
-	}
+	while (!end && !ball[i].out_of_radar) 
+		update_ball_position(i, dt);
 	tasks--;
-	printf("    terminato task %d  colore %d coordinate %f %f\n", i, ball[i].c, 
-	ball[i].x, ball[i].y);
+	printf("\t\tTask %d ended. Color %d coordinates %f %f\n", i, ball[i].c, 
+	 ball[i].x, ball[i].y);
 }
 
 //------------------------------------------------------------------------------
-// LINE_SCAN: used to scan objects in a straight line. x0 and y0 are the 
+// LINE_SCAN: used to scan objects in a straigh	t line. x0 and y0 are the 
 // coordinates of the starting point of the line and a is the angle.
 //------------------------------------------------------------------------------
 void line_scan(int x0,int y0, int a) {
 	int lx,ly;
-	int d;
+	int d;	
 	int target;
 	int i, j;
 	float alpha;
@@ -574,7 +575,7 @@ void path_randomizer() {
 						}
 						break;
 				}
-				printf("acceleration k %d  al: %f ac: %f vel: %f\n", k,
+				printf("acceleration k: %d  al: %f ac: %f vel: %f\n", k,
 				 ball[k].al, ball[k].ac, vel_modulus);
 			}
 		}
@@ -597,8 +598,7 @@ void * tracking_task(void* arg) {
 //	clock_t prior_scanning_time;
 	int nr_sub_samples = 0;
 	int sub_samples_x[10], sub_samples_y[10];
-	char ss[LEN];
-	printf("%s\n", ss);
+//	printf("%s\n", ss);
 	while(!end) {
 		pthread_mutex_lock(&mutex);
 		pthread_cond_wait(&m.ptrt[i], &mutex);
@@ -649,30 +649,52 @@ void * tracking_task(void* arg) {
 	return 0;
 }
 
+void handles_i(void){
+	char str[5];
+	char ss[24];
+	textout_ex(buffer, font, "Enter k:          ", 10, 50, 2, BKG);
+	textout_ex(buffer, font, "                ", 10, 60, 2, BKG);
+	get_string(str, 80, 50, 3, 0);
+	sscanf(str, "%d", &k_samples);
+	if (k_samples < 2) textout_ex(buffer, font, "too little      ", 10, 60, 2, 
+	 BKG);
+	if (k_samples > 5) textout_ex(buffer, font, "too big         ", 10, 60, 2, 
+	 BKG);
+	if (k_samples >= 2 && k_samples <= 5) {
+		sprintf(ss, "Accepted : %d", k_samples);
+		textout_ex(buffer, font, ss, 10, 60, 2, BKG);
+	}
+}
+
+void handles_spaces(void){
+	int i;
+	if (tasks < MAXT) {
+		i = ptask_create_prio(ball_task, PER, 50, NOW);
+		tasks++;
+		printf("\tTask %d created. Total balls num: %d\n", i, tasks);
+	} else {
+		printf("\tCANNOT CREATE MORE TASK: max number %d reached\n", tasks);
+	}
+}
 
 int main(void) {
-	int i;
-	int j;
-	char ss[24];
-	char str[5];
-	char scan;
+	int j;	// loop indexes
+	char scan;		//ascii character for scan ball
 	pthread_attr_t a;
 	pthread_t p;
 
 	init();
-
 	pthread_attr_init(&a);
-
 	pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
 	int balls[MAX_BALLS];
+	
 	for (j = 0; j < MAX_BALLS; j++) {
 		balls[j] = j;
 		pthread_create(&p, &a, tracking_task, (void*)&balls[j]);
 	}
-
 	// the randomizer and radartask are called at specific intervals
-	i = ptask_create_prio(radartask, PERRADAR, 70, NOW);
-	i = ptask_create_prio(path_randomizer, PERRANDOMIZER, 10, NOW);
+	ptask_create_prio(radartask, PERRADAR, 70, NOW);
+	ptask_create_prio(path_randomizer, PERRANDOMIZER, 10, NOW);
 	textout_ex(buffer, font, "Press I for entering k ", 10, 30, 3, 0);
 	textout_ex(buffer, font, "Press SPACE to create a moving object", 10, 10,
 	 11, BKG);
@@ -681,32 +703,8 @@ int main(void) {
 	do {
 		scan = 0;
 		if (keypressed()) scan = readkey() >> 8;
-
-		if (scan == KEY_SPACE) {
-			if  (tasks < MAXT) {
-				i = ptask_create_prio(ball_task, PER, 50, NOW);
-				tasks++;
-				printf("            creato task %d nr totale task palle %d\n",
-				 i, tasks);
-			} else {
-				printf("            IMPOSSIBILE CREARE NUOVI TASKS raggiunto nr max %d \n", 
-				tasks);
-			}
-		}
-		if (scan == KEY_I) {
-			textout_ex(buffer, font, "Enter k:          ", 10, 50, 2, BKG);
-			textout_ex(buffer, font, "                ", 10, 60, 2, BKG);
-			get_string(str, 80, 50, 3, 0);
-			sscanf(str, "%d", &k_samples);
-			if (k_samples < 2) textout_ex(buffer, font, "too little      ", 10,
-			 60, 2, BKG);
-			if (k_samples > 5) textout_ex(buffer, font, "too big         ", 10,
-			 60, 2, BKG);
-			if (k_samples >= 2 && k_samples <= 5) {
-				sprintf(ss, "Accepted : %d", k_samples);
-				textout_ex(buffer, font, ss, 10, 60, 2, BKG);
-			}
-		}
+		if (scan == KEY_SPACE) handles_spaces();
+		if (scan == KEY_I) handles_i();
 
 		sleep(0.2);
 	} while (scan != KEY_ESC);
