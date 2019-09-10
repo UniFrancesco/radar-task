@@ -21,7 +21,7 @@
 //------------------------------------------------------------------------------
 #define MAXT 25    // max number of balls tasks
 #define LEN 80    // max message length
-#define PER 20    // base period
+#define PER 20    // base period 
 #define PERRADAR 5    // base period
 #define PERRANDOMIZER 5000 //
 #define PI 3.1415926536    // pi greco
@@ -94,16 +94,15 @@ struct misure_t { // contains newest interceptions
 } m;
 
 struct track_t { // contains positions computed by tracking tasks           
-	int status[MAX_BALLS];
+	int status[MAX_BALLS];	// can be ON or OFF
 	float ix[MAX_BALLS][MAX_TRACK_SAMPLES];
 	float iy[MAX_BALLS][MAX_TRACK_SAMPLES];
 	int oldest_index[MAX_BALLS];
 	int newest_index[MAX_BALLS];
-	float prvs_prdct_ix[MAX_BALLS];  //previous predicted ix
-	float prvs_prdct_iy[MAX_BALLS];  //previous predicted iy
-	float prdct_ix[MAX_BALLS];
-	float prdct_iy[MAX_BALLS];
-	int prdct_flag[MAX_BALLS];
+	float prvs_prdct_ix[MAX_BALLS];  // previous predicted ix
+	float prvs_prdct_iy[MAX_BALLS];  // previous predicted iy
+	float prdct_ix[MAX_BALLS];	// predicted ix
+	float prdct_iy[MAX_BALLS];	// predicted iy
 } t;
 
 pthread_mutex_t mutex;
@@ -201,7 +200,7 @@ void draw_ball(int i) {
 }
 
 //------------------------------------------------------------------------------
-// CLEAR_BALL: ripulisce le coordinate delle vecchie palle
+// CLEAR_BALL: clears old balls' coordinates
 //------------------------------------------------------------------------------
 void clear_ball(int i) {
 	int x_old, y_old;
@@ -234,21 +233,21 @@ void update_ball_position(int i, float dt){
 	ax = ball[i].ac * cos(alpha + PI/2); // banking
 	ay = ball[i].ac * sin(alpha + PI/2);
 
-	ball[i].vx += ax*dt;
-	ball[i].vy += ay*dt;
+	ball[i].vx += ax * dt;
+	ball[i].vy += ay * dt;
 	vel_modulus_after = sqrt(ball[i].vx * ball[i].vx + ball[i].vy
 	 * ball[i].vy);
-	ball[i].vx *= vel_modulus/vel_modulus_after; 
-	ball[i].vy *= vel_modulus/vel_modulus_after;
-	ax = ball[i].al*cos(alpha);   //longitudinal acceleration
-	ay = ball[i].al*sin(alpha);
-	ball[i].vx += ax*dt;
-	ball[i].vy += ay*dt;
+	ball[i].vx *= vel_modulus / vel_modulus_after; 
+	ball[i].vy *= vel_modulus / vel_modulus_after;
+	ax = ball[i].al * cos(alpha);   //longitudinal acceleration
+	ay = ball[i].al * sin(alpha);
+	ball[i].vx += ax * dt;
+	ball[i].vy += ay * dt;
 	ball[i].x_old = ball[i].x;
 	ball[i].y_old = ball[i].y;
-	ball[i].x += ball[i].vx*dt;
-	ball[i].y += ball[i].vy*dt;
-	float dist = distance(ball[i].x,ball[i].y,YWIN/2,YWIN/2);
+	ball[i].x += ball[i].vx * dt;
+	ball[i].y += ball[i].vy * dt;
+	float dist = distance(ball[i].x, ball[i].y, YWIN/2, YWIN/2);
 
 	if (dist > RR) {
 		ball[i].out_of_radar = TRUE;
@@ -278,96 +277,148 @@ void ball_task() {
 }
 
 //------------------------------------------------------------------------------
+// BALL_TIME_CHECK: 
+//------------------------------------------------------------------------------
+void ball_time_check(clock_t scanning_time, int i) {
+	long elapsed_clocks;
+	double cpu_time_elapsed;
+	if (m.object[i] != 0) {
+		elapsed_clocks = scanning_time - m.ct[i];
+		cpu_time_elapsed = ((double)(elapsed_clocks)) / CLOCKS_PER_SEC;
+		if (elapsed_clocks > 10000 && m.burst[i] == TRUE) {
+			pthread_mutex_lock(&mutex);
+			m.burst[i] = FALSE;
+			m.ct[i] = scanning_time;
+			pthread_mutex_unlock(&mutex);
+			pthread_cond_signal(&m.ptrt[i]);
+		}
+		
+		// signalling tracking task that contact is lost by setting
+		// m.object = 0 when elapsed > 3
+		if (cpu_time_elapsed > 3.) {
+			pthread_mutex_lock(&mutex);
+			m.object[i] = 0;      
+			m.burst[i] = FALSE;
+			m.ct[i] = scanning_time;
+			pthread_mutex_unlock(&mutex);
+			pthread_cond_signal(&m.ptrt[i]);
+		}
+	}
+}
+
+//------------------------------------------------------------------------------
+// ASSIGN_MEASURE: used to record in the measure resource the coordinates, the
+// color and the scanning time of ball j
+//------------------------------------------------------------------------------
+void assign_measure(int lx, int ly, clock_t scanning_time, int target, int j){
+	pthread_mutex_lock(&mutex);
+	m.object[j] = target;
+	m.ix[j] = lx;
+	m.iy[j] = ly;
+	m.ct[j] = scanning_time;
+	m.burst[j] = TRUE;
+	pthread_mutex_unlock(&mutex);
+}
+
+//------------------------------------------------------------------------------
 // LINE_SCAN: used to scan objects in a straigh	t line. x0 and y0 are the 
 // coordinates of the starting point of the line and a is the angle.
 //------------------------------------------------------------------------------
-void line_scan(int x0,int y0, int a) {
-	int lx,ly;
+void line_scan(int x0, int y0, int a) {
+	int lx,ly;	// line coordinates
 	int d;	
-	int target;
-	int i, j;
+	int target;	// color to get using getpixel
+	int i, j;	// i used to loop through the balls, while j is used to 
+				// register the first known index
 	float alpha;
-	alpha = a * PI/1800;
+	alpha = a * PI / 1800;
 	clock_t scanning_time = clock();
-	double cpu_time_elapsed;
-	long elapsed_clocks;
 
-// scanning array looking for old objects
-// and looking for end of bursts 
-	for (i = 0; i<MAX_BALLS; i++) {      
-		if (m.object[i] != 0) {
-			elapsed_clocks = scanning_time-m.ct[i];
-			cpu_time_elapsed = ((double)(elapsed_clocks))/CLOCKS_PER_SEC;
-			if (elapsed_clocks>10000&&m.burst[i] == TRUE) {
-				pthread_mutex_lock(&mutex);
-				m.burst[i] = FALSE;
-				m.ct[i] = scanning_time;
-				pthread_mutex_unlock(&mutex);
-				pthread_cond_signal(&m.ptrt[i]);
-			}
-			
-			// signalling tracking task that contact is lost by setting
-			// m.object = 0 when elapsed > 3
-			if (cpu_time_elapsed > 3.) {
-				pthread_mutex_lock(&mutex);
-				m.object[i] = 0;      
-				m.burst[i] = FALSE;
-				m.ct[i] = scanning_time;
-				pthread_mutex_unlock(&mutex);
-				pthread_cond_signal(&m.ptrt[i]);
-			}
-		}
+// scanning array looking for old objects and looking for end of bursts 
+	for (i = 0; i < MAX_BALLS; i++) {      
+		ball_time_check(scanning_time, i);
 	}
 
-
-	for (d = RRMIN; d<RRMAX-1; d += RSTEP) {
-		lx = x0 + d*cos(alpha);
-		ly = y0 + d*sin(alpha);
+// scan through the entire radar length for intersection points with the balls
+	for (d = RRMIN; d < RRMAX - 1; d += RSTEP) {
+		lx = x0 + d * cos(alpha);
+		ly = y0 + d * sin(alpha);
 		target = getpixel(sky, lx, ly);
-		if (target>0) {
+		if (target > 0) {
 			j = -1;
 			for (i = 0; i < MAX_BALLS; i++) {
 				if (m.object[i] == 0 && j == -1) j = i; // first free index
 				if (m.object[i] == target && (int)distance(lx, ly, m.ix[i],
 				 m.iy[i]) < DISTANCE_TRHESHOLD){ // hit known object
-					j=i;
+					j = i;
 					break;
 				}
 			}
 			if (j != -1) {
-				pthread_mutex_lock(&mutex);
-				m.object[j] = target;
-				m.ix[j] = lx;
-				m.iy[j] = ly;
-				m.ct[j] = scanning_time;
-				m.burst[j] = TRUE;
-				pthread_mutex_unlock(&mutex);
+				assign_measure(lx, ly, scanning_time, target, j);
 				pthread_cond_signal(&m.ptrt[j]);
 			}
 		}
 	}
 }
 
-
 //------------------------------------------------------------------------------
 // ADD_INDEX: calculates next index of the circular array used for balls
 // positions.
 //------------------------------------------------------------------------------
 int add_index(int a, int k) {
-	if (k<0) k += MAX_TRACK_SAMPLES;
+	if (k < 0) k += MAX_TRACK_SAMPLES;
 	int sidx = (a + k) % MAX_TRACK_SAMPLES;
 	return sidx;
+}
+
+//------------------------------------------------------------------------------
+// FIND_BALL_SAMPLES: given ball index i returns the number of ball samples to
+// print
+//------------------------------------------------------------------------------
+int find_ball_sample(int j){
+	int samples_to_display;
+	samples_to_display = t.newest_index[j] - t.oldest_index[j] + 1;
+	
+	if (samples_to_display <= 0) 
+		samples_to_display = MAX_TRACK_SAMPLES;
+	
+	if (t.status[j] == OFF) 
+		samples_to_display = 0;
+		
+	return samples_to_display;
+}
+
+//------------------------------------------------------------------------------
+// ROTATE_RADAR: handles the radar rotation, the rotation of the angle at each
+// cycle is determined by the inc parameter
+//------------------------------------------------------------------------------
+void rotate_radar(int inc, int* a, float* alpha){
+
+	*alpha = *a * PI / 1800;
+	// clears old radar beam
+	line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(*alpha), 
+	YWIN/2 + RR * sin(*alpha), BKG);
+
+	*a = *a + inc;
+	if (*a == 3600) *a = 0;
+
+	line_scan(YWIN/2, YWIN/2, *a);
+
+	*alpha = *a * PI /1800;
+	// draws radar beam
+	line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(*alpha),
+	 YWIN/2 + RR * sin(*alpha), WHITE);
 }
 
 //------------------------------------------------------------------------------
 // RADAR_TASK: handles the rotation of the randar and clears old tracks and
 // ball positions
 //------------------------------------------------------------------------------
-void radartask() {
-	int i; // task index
+void radartask(void) {
+	int i, k; // task index i and sample index k
 	int a = 0; // scanning direction (deg*10)
 	int j; // array index
-	int k;
 	int sidx;   // sample index
 	int samples_to_display;
 	int radius;
@@ -375,39 +426,20 @@ void radartask() {
 
 	i = ptask_get_index();
 	while (!end) {
-		alpha = a * PI /1800;
-		line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(alpha), 
-		YWIN/2 + RR * sin(alpha), BKG);
-
-		a = a + 5;
-		if (a == 3600) a = 0;
-
-		line_scan(YWIN/2, YWIN/2, a);
-
-		alpha = a * PI /1800;
-		line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(alpha),
-		YWIN/2 + RR*sin(alpha), WHITE);
-
-// for (j = 0;j<MAX_BALLS;j++){
-//    if (m.object[j] != 0) circlefill(buffer, m.ix[j], m.iy[j],3,m.object[j]);
-//  }
-
-		for (j = 0; j<MAX_BALLS; j++) {
-			samples_to_display = t.newest_index[j] - t.oldest_index[j]+1;
-			if (samples_to_display <= 0) samples_to_display = MAX_TRACK_SAMPLES;
-			if (t.status[j] == OFF) samples_to_display = 0;
-
-//            if (t.active[j] && a = =0)
-//               printf("old ix %d new ix %d samples_to_display %d \n",t.oldest_ index[j],t.newest_index[j],samples_to_display);
-
+		
+		rotate_radar(5, &a, &alpha);
+		
+		for (j = 0; j < MAX_BALLS; j++) {
+			samples_to_display = find_ball_sample(j);
 			radius = 1;
-			for (k = 0; k<samples_to_display; k++) {
+			for (k = 0; k < samples_to_display; k++) {
 
 				sidx = add_index(t.oldest_index[j], k);
 
-				if (k == 1) draw_arrow(t.ix[j][add_index(t.newest_index[j], -1)], 
-				t.iy[j][add_index(t.newest_index[j], -1)], t.prvs_prdct_ix[j],  
-				t.prvs_prdct_iy[j], BKG);
+				if (k == 1)
+					draw_arrow(t.ix[j][add_index(t.newest_index[j], -1)], 
+					t.iy[j][add_index(t.newest_index[j], -1)],
+					t.prvs_prdct_ix[j],  t.prvs_prdct_iy[j], BKG);
 
 				// clearing not active tracks or samples
 				if ((k == 0 && samples_to_display == MAX_TRACK_SAMPLES) || 
@@ -415,29 +447,29 @@ void radartask() {
 					circlefill(buffer,t.ix[j][sidx],t.iy[j][sidx],3,BKG);
 				} else {
 				// clearing before drawing needed for resizing
-					circlefill(buffer, t.ix[j][sidx], t.iy[j][sidx], 3, 
-					BKG);              
+					circlefill(buffer, t.ix[j][sidx], t.iy[j][sidx], 3, BKG);
 					circlefill(buffer, t.ix[j][sidx], t.iy[j][sidx], radius,
 					m.object[j]); // drawing active tracks
 				}
-				if (k >= samples_to_display - 3) radius++; // newest sample has radius 3 the oldest ones a smaller radius
+				
+				// newest sample has radius 3 the oldest ones a smaller radius
+				if (k >= samples_to_display - 3) radius++; 
 			}
 			if (samples_to_display >= 2) {
 				draw_arrow(t.ix[j][t.newest_index[j]],
 				 t.iy[j][t.newest_index[j]], t.prdct_ix[j], t.prdct_iy[j],
 				  m.object[j]);
 			} 
-			if (t.status[j]==SHUTTING_DOWN) {
+			if (t.status[j] == SHUTTING_DOWN) {
 				t.status[j] = OFF;
 				t.oldest_index[j] = 0;
 				t.newest_index[j] = 0;
 			}
 		}
 
-		circle(buffer, YWIN/2, YWIN/2, RR, 50);
-		vsync();
-		blit(buffer, screen, 0, 0, 0, 0, width, height);
-
+	circle(buffer, YWIN/2, YWIN/2, RR, 50);
+	vsync();
+	blit(buffer, screen, 0, 0, 0, 0, width, height);
 	ptask_wait_for_period(i);
 	}
 }
@@ -574,6 +606,8 @@ void path_randomizer() {
 							ball[k].ac = 0;
 						}
 						break;
+					default:
+						break;
 				}
 				printf("acceleration k: %d  al: %f ac: %f vel: %f\n", k,
 				 ball[k].al, ball[k].ac, vel_modulus);
@@ -584,30 +618,54 @@ void path_randomizer() {
 }
 
 //------------------------------------------------------------------------------
-// TRACKING_TASK: 
+// SAVE_MEASURES: used for the atomic copy of data contained in the m resource
 //------------------------------------------------------------------------------
-void * tracking_task(void* arg) {
+void save_measures(int i, int* ix, int* iy, int* object, int* burst){
+
+	pthread_mutex_lock(&mutex);
+	pthread_cond_wait(&m.ptrt[i], &mutex);
+	*object = m.object[i];
+	*ix = m.ix[i]; 	// copy of shared data 
+	*iy = m.iy[i];
+	*burst = m.burst[i];
+	pthread_mutex_unlock(&mutex);
+}
+
+//------------------------------------------------------------------------------
+// COMPUTE_MEAN_POSITIONS: used to calcolate mean positions from the samples
+// contained in ssx and ssy, which are the samples found during the burst 
+// period
+//------------------------------------------------------------------------------
+void compute_mean_positions(int *max_samples, int* ssx, int* ssy, float* fix,
+ float* fiy){
+	int k;	// samples index
+	*fix = 0.;	// sample x coordinate
+	*fiy = 0.;	// sample y coordinate
+	for (k = 0; k < *max_samples; k++) {
+		*fix += ssx[k];
+		*fiy += ssy[k];
+	}
+	*fix = *fix / *max_samples;
+	*fiy = *fiy / *max_samples;
+
+}
+
+//------------------------------------------------------------------------------
+// TRACKING_TASK: handles the tracking of balls' position and updates them
+// after it has calculated the mean samples 
+//------------------------------------------------------------------------------
+void* tracking_task(void* arg) {
 	int i = *(int*)arg;
 	int status = NOT_TRACKING;
-//	int samples;
 	int object;		// colour of tracked object
 	int ix, iy;
 	float fix, fiy;
 	int burst;
-//	clock_t ct;
-//	clock_t prior_scanning_time;
 	int nr_sub_samples = 0;
 	int sub_samples_x[10], sub_samples_y[10];
-//	printf("%s\n", ss);
+
 	while(!end) {
-		pthread_mutex_lock(&mutex);
-		pthread_cond_wait(&m.ptrt[i], &mutex);
-			object = m.object[i];
-			ix = m.ix[i]; 	// copy of shared data 
-			iy = m.iy[i];
-			burst = m.burst[i];
-//			ct = m.ct[i];
-		pthread_mutex_unlock(&mutex);
+		save_measures(i, &ix, &iy, &object, &burst);
 
 		if (object != 0) {
 			if (burst && nr_sub_samples < 10) {
@@ -622,25 +680,14 @@ void * tracking_task(void* arg) {
 		}
 		else {
 			status = NOT_TRACKING;
-//			samples = 0;
 			nr_sub_samples = 0;
 			update_computed_data(i, fix, fiy, status, object);
 		}
-//        sprintf(ss, "intercettato %d scanning time %lu %ld %d %d %d",i,ct,(ct-prior_scanning_time),ix,iy,burst);
-//        textout_ex(buffer, font, ss, 10, 30, 3, 0);
-//        printf("%s\n",ss);
-//        printf("status %d nr_sub_samples %d \n",status,nr_sub_samples);
-//		prior_scanning_time = ct;
 
 		if (status == TRACKING_END_OF_BURST) {
-			fix = 0.;
-			fiy = 0.;
-			for (int k = 0; k < nr_sub_samples; k++) {
-				fix += sub_samples_x[k];
-				fiy += sub_samples_y[k];
-			}
-			fix = fix/nr_sub_samples;
-			fiy = fiy/nr_sub_samples;
+			
+			compute_mean_positions(&nr_sub_samples, sub_samples_x,
+			 sub_samples_y, &fix, &fiy);
 			nr_sub_samples = 0;
 			// updating shared area for display
 			update_computed_data(i, fix,fiy, status, object);
@@ -649,6 +696,10 @@ void * tracking_task(void* arg) {
 	return 0;
 }
 
+//------------------------------------------------------------------------------
+// HANDLES_I: called when i is pressed, which is used to decide the number of
+// samples the program has to take before predicting the next position 
+//------------------------------------------------------------------------------
 void handles_i(void){
 	char str[5];
 	char ss[24];
@@ -666,6 +717,10 @@ void handles_i(void){
 	}
 }
 
+//------------------------------------------------------------------------------
+// HANDLES_SPACES: called when the space key is pressed, spawns the balls on the
+// screen
+//------------------------------------------------------------------------------
 void handles_spaces(void){
 	int i;
 	if (tasks < MAXT) {
