@@ -277,14 +277,18 @@ void ball_task() {
 }
 
 //------------------------------------------------------------------------------
-// BALL_TIME_CHECK: 
+// BURST_CHECK: if the last recorded measure for ball i is too old, set the
+// burst as false
 //------------------------------------------------------------------------------
-void ball_time_check(clock_t scanning_time, int i) {
-	long elapsed_clocks;
-	double cpu_time_elapsed;
+void burst_check(clock_t scanning_time, int i) {
+	long elapsed_clocks;	// number of clocks since the last measure
+	double cpu_time_elapsed;	// elapsed time in seconds
 	if (m.object[i] != 0) {
 		elapsed_clocks = scanning_time - m.ct[i];
+		// posix defines CLOCKS_PER_SEC as one million regardless of hardware
 		cpu_time_elapsed = ((double)(elapsed_clocks)) / CLOCKS_PER_SEC;
+		
+		// after 0.01 sec have passed sets burst to false and records time
 		if (elapsed_clocks > 10000 && m.burst[i] == TRUE) {
 			pthread_mutex_lock(&mutex);
 			m.burst[i] = FALSE;
@@ -294,7 +298,8 @@ void ball_time_check(clock_t scanning_time, int i) {
 		}
 		
 		// signalling tracking task that contact is lost by setting
-		// m.object = 0 when elapsed > 3
+		// m.object = 0 when 3 sec have passed (it takes less than 3 sec to
+		// perform a full rotation)
 		if (cpu_time_elapsed > 3.) {
 			pthread_mutex_lock(&mutex);
 			m.object[i] = 0;      
@@ -336,7 +341,7 @@ void line_scan(int x0, int y0, int a) {
 
 // scanning array looking for old objects and looking for end of bursts 
 	for (i = 0; i < MAX_BALLS; i++) {      
-		ball_time_check(scanning_time, i);
+		burst_check(scanning_time, i);
 	}
 
 // scan through the entire radar length for intersection points with the balls
