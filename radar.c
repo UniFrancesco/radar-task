@@ -131,7 +131,7 @@ void init(void) {
 
 	pthread_condattr_init(&cattr);
 	pthread_mutex_init(&mutex, &attr);
-	for (i=0; i<MAX_BALLS; i++) {
+	for (i=0; i < MAX_BALLS; i++) {
 		m.object[i] = 0;
 		m.burst[i] = FALSE;
 		pthread_cond_init(&m.ptrt[i], &cattr);
@@ -520,11 +520,27 @@ void compute_predicted_data(int i) {
 	t.prvs_prdct_ix[i] = t.prdct_ix[i];
 	t.prvs_prdct_iy[i] = t.prdct_iy[i];
 	
-	if (samples >= k_samples && k_samples >= 2 && k_samples <= 5) {
-		t.prdct_ix[i] = 2 * t.ix[i][t.newest_index[i]] - 
-		t.ix[i][add_index(t.newest_index[i], -1)];
+	if (samples < k_samples){
+		t.prdct_ix[i] = 0;
+		t.prdct_iy[i] = 0;
+	}
+	
+	if (samples >= k_samples && k_samples == 2) {
+		t.prdct_ix[i] = 2 * t.ix[i][t.newest_index[i]] -
+		 t.ix[i][add_index(t.newest_index[i], -1)];
+		
 		t.prdct_iy[i] = 2 * t.iy[i][t.newest_index[i]]
 		 - t.iy[i][add_index(t.newest_index[i], -1)];
+	}
+	
+	if (samples >= k_samples && k_samples >= 3) {
+		t.prdct_ix[i] = 3 * t.ix[i][t.newest_index[i]] -
+		 3 * t.ix[i][add_index(t.newest_index[i], -1)] + 
+		 t.ix[i][add_index(t.newest_index[i], -2)];
+		
+		t.prdct_iy[i] = 3 * t.iy[i][t.newest_index[i]] -
+		 3 * t.iy[i][add_index(t.newest_index[i], -1)] +
+		 t.iy[i][add_index(t.newest_index[i], -2)];
 	}
 }
 
