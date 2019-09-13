@@ -14,4 +14,7 @@ $(MAIN): $(MAIN).o
 
 $(MAIN).o: $(MAIN).c
 	$(CC) -c $(MAIN).c -I./include -Wall
+	
+clean:
+	rm $(MAIN).o $(MAIN)
 
