@@ -61,7 +61,7 @@ int end = 0; // end flag
 int tasks = 0; // number of balls tasks
 int k_samples = 0; // selected at run time by user
 
-
+	
 struct status { // ball structure 
 	int out_of_radar;
 	int c;  // color [1,15]
@@ -87,8 +87,8 @@ struct misure_t { // contains newest interceptions
 									// task tracking
 	int object[MAX_BALLS] ; //	used to indicate which balls are currently
 							// active
-	int ix[MAX_BALLS];  // last x ccordinate intercepted by beam
-	int iy[MAX_BALLS];
+	int ix[MAX_BALLS];  // last x coordinate intercepted by beam
+	int iy[MAX_BALLS];	// last y coordinate intercepted by beam
 	clock_t ct[MAX_BALLS];  // time of hit
 	int burst[MAX_BALLS];   // true when there are open burst
 } m;
@@ -289,6 +289,8 @@ void burst_check(clock_t scanning_time, int i) {
 		cpu_time_elapsed = ((double)(elapsed_clocks)) / CLOCKS_PER_SEC;
 		
 		// after 0.01 sec have passed sets burst to false and records time
+		// signals to the tracking threads that have a ball color that
+		// the burst of measures is over
 		if (elapsed_clocks > 10000 && m.burst[i] == TRUE) {
 			pthread_mutex_lock(&mutex);
 			m.burst[i] = FALSE;
@@ -314,6 +316,7 @@ void burst_check(clock_t scanning_time, int i) {
 //------------------------------------------------------------------------------
 // ASSIGN_MEASURE: used to record in the measure resource the coordinates, the
 // color and the scanning time of ball j
+// awoken mode 1: ball intercepted
 //------------------------------------------------------------------------------
 void assign_measure(int lx, int ly, clock_t scanning_time, int target, int j){
 	pthread_mutex_lock(&mutex);
@@ -360,6 +363,8 @@ void line_scan(int x0, int y0, int a) {
 				}
 			}
 			if (j != -1) {
+			
+			// waking up the thread when ball is intercepted
 				assign_measure(lx, ly, scanning_time, target, j);
 				pthread_cond_signal(&m.ptrt[j]);
 			}
@@ -514,7 +519,8 @@ void get_string(char *str, int x, int y, int c, int b) {
 // is greater than k_samples
 //------------------------------------------------------------------------------
 void compute_predicted_data(int i) {
-	int samples = t.newest_index[i] - t.oldest_index[i]+1;
+
+	int samples = t.newest_index[i] - t.oldest_index[i] + 1;
 	
 	if (samples <= 0) samples = MAX_TRACK_SAMPLES;
 	t.prvs_prdct_ix[i] = t.prdct_ix[i];
@@ -525,6 +531,7 @@ void compute_predicted_data(int i) {
 		t.prdct_iy[i] = 0;
 	}
 	
+	// prediction with only 2 samples
 	if (samples >= k_samples && k_samples == 2) {
 		t.prdct_ix[i] = 2 * t.ix[i][t.newest_index[i]] -
 		 t.ix[i][add_index(t.newest_index[i], -1)];
@@ -533,6 +540,7 @@ void compute_predicted_data(int i) {
 		 - t.iy[i][add_index(t.newest_index[i], -1)];
 	}
 	
+	// predictiong using more than 3 samples
 	if (samples >= k_samples && k_samples >= 3) {
 		t.prdct_ix[i] = 3 * t.ix[i][t.newest_index[i]] -
 		 3 * t.ix[i][add_index(t.newest_index[i], -1)] + 
@@ -577,7 +585,7 @@ void update_computed_data(int i, float fix, float fiy, int status, int object) {
 	textout_ex(screen, font, s, 600, 10, 14, BKG);
 	sprintf(s, "    Measured       Predicted");
 	textout_ex(screen, font, s, 600, 20, 14, BKG);
-	sprintf(s, "%2d) %6.2f %6.2f  %6.2f %6.2f", i, fix, fiy, pix, piy);  //,t.newest_index[i]
+	sprintf(s, "%2d) %6.2f %6.2f  %6.2f %6.2f", i, fix, fiy, pix, piy);
 	textout_ex(screen, font, s, 600, 30+10*i, object, BKG);
 }
 
@@ -672,10 +680,10 @@ void compute_mean_positions(int *max_samples, int* ssx, int* ssy, float* fix,
 }
 
 //------------------------------------------------------------------------------
-// TRACKING_TASK: handles the tracking of balls' position and updates them
-// after it has calculated the mean samples 
+// TRACKING_THREAD: handles the tracking of the position of a ball and updates
+// it after it has calculated the mean position using all samples 
 //------------------------------------------------------------------------------
-void* tracking_task(void* arg) {
+void* tracking_thread(void* arg) {
 	int i = *(int*)arg;
 	int status = NOT_TRACKING;
 	int object;		// colour of tracked object
@@ -755,7 +763,7 @@ void handles_spaces(void){
 
 int main(void) {
 	int j;	// loop indexes
-	char scan;		//ascii character for scan ball
+	char scan;	//ascii character for scan ball
 	pthread_attr_t a;
 	pthread_t p;
 
@@ -764,9 +772,10 @@ int main(void) {
 	pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
 	int balls[MAX_BALLS];
 	
+	// create tracking threads up to the maximum number of balls
 	for (j = 0; j < MAX_BALLS; j++) {
 		balls[j] = j;
-		pthread_create(&p, &a, tracking_task, (void*)&balls[j]);
+		pthread_create(&p, &a, tracking_thread, (void*)&balls[j]);
 	}
 	// the randomizer and radartask are called at specific intervals
 	ptask_create_prio(radartask, PERRADAR, 70, NOW);
