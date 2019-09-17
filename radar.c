@@ -165,7 +165,7 @@ double distance(int x1, int y1, int x2, int y2) {
 // INIT_BALL: Initialises balls position and speed
 //------------------------------------------------------------------------------
 void init_ball(int i, float dt) {
-	float	alpha;
+	float	alpha;	// angle in radiants used for the ball starting direction
 	float	x, y;
 	ball[i].out_of_radar = FALSE;
 	ball[i].c = 2 + i % 14; // color in [2, 15]
@@ -177,8 +177,8 @@ void init_ball(int i, float dt) {
 	ball[i].vy = frand(VMIN, VMAX);
 	ball[i].al = 0;
 	ball[i].ac = 0;
-	x= ball[i].x + ball[i].vx * 50 * dt;
-	y= ball[i].y + ball[i].vy * 50 * dt;
+	x = ball[i].x + ball[i].vx * 50 * dt;
+	y = ball[i].y + ball[i].vy * 50 * dt;
 //
 // if initial random speed is outbound then inversion
 //
@@ -200,12 +200,14 @@ void draw_ball(int i) {
 	y = YWIN - ball[i].y;
 	x_old = ball[i].x_old;
 	y_old = YWIN - ball[i].y_old;
+	
+	// clear the old coordinates of the ball before drawing new ones
 	circlefill(sky, x_old, y_old, ball[i].r, BKG);
 	circlefill(sky, x, y, ball[i].r, ball[i].c);
 }
 
 //------------------------------------------------------------------------------
-// CLEAR_BALL: clears old balls' coordinates
+// CLEAR_BALL: clears the old coordinates of the ball
 //------------------------------------------------------------------------------
 void clear_ball(int i) {
 	int		x_old, y_old;
@@ -213,7 +215,6 @@ void clear_ball(int i) {
 	x_old = ball[i].x_old;
 	y_old = YWIN - ball[i].y_old;
 	circlefill(sky, x_old, y_old, ball[i].r, BKG);
-	circle(sky, YWIN/2, YWIN/2, RR, 50);
 }
 
 //------------------------------------------------------------------------------
@@ -292,6 +293,7 @@ void burst_check(clock_t scanning_time, int i) {
 	long	elapsed_clocks;		// number of clocks since the last measure
 	double	cpu_time_elapsed;	// elapsed time in seconds
 	
+	// if an object has been intercepted
 	if (m.object[i] != 0) {
 		elapsed_clocks = scanning_time - m.ct[i];
 		// posix defines CLOCKS_PER_SEC as one million regardless of hardware
@@ -324,8 +326,7 @@ void burst_check(clock_t scanning_time, int i) {
 
 //------------------------------------------------------------------------------
 // ASSIGN_MEASURE: used to record in the measure resource the coordinates, the
-// color and the scanning time of ball j
-// awoken mode 1: ball intercepted
+// color and the scanning time of ball j when inside burst period
 //------------------------------------------------------------------------------
 void assign_measure(int lx, int ly, clock_t scanning_time, int target, int j){
 	pthread_mutex_lock(&mutex);
@@ -410,25 +411,26 @@ int find_ball_sample(int j){
 }
 
 //------------------------------------------------------------------------------
-// ROTATE_RADAR: handles the radar rotation, the rotation of the angle at each
-// cycle is determined by the inc parameter
+// ROTATE_RADAR: handles the radar rotation and scans along a direction. The
+// rotation of the angle at each cycle is determined by the inc parameter
 //------------------------------------------------------------------------------
-void rotate_radar(int inc, int* a, float* alpha){
-
-	*alpha = *a * PI / 1800;
+void rotate_radar(int inc, int* a){
+	
+	float alpha;
+	alpha = *a * PI / 1800;
 	// clears old radar beam
-	line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(*alpha), 
-	YWIN/2 + RR * sin(*alpha), BKG);
+	line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(alpha), 
+	YWIN/2 + RR * sin(alpha), BKG);
 
 	*a = *a + inc;
 	if (*a == 3600) *a = 0;
 
 	line_scan(YWIN/2, YWIN/2, *a);
 
-	*alpha = *a * PI /1800;
+	alpha = *a * PI /1800;
 	// draws radar beam
-	line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(*alpha),
-	 YWIN/2 + RR * sin(*alpha), WHITE);
+	line(buffer, YWIN/2, YWIN/2, YWIN/2 + RR * cos(alpha),
+	 YWIN/2 + RR * sin(alpha), WHITE);
 }
 
 //------------------------------------------------------------------------------
@@ -442,12 +444,11 @@ void radartask(void) {
 	int		sidx;	// sample index
 	int		samples_to_display;
 	int		radius;
-	float	alpha = 0;
 
 	i = ptask_get_index();
 	while (!end) {
 		
-		rotate_radar(5, &a, &alpha);
+		rotate_radar(5, &a);
 		
 		for (j = 0; j < MAX_BALLS; j++) {
 			samples_to_display = find_ball_sample(j);
@@ -456,7 +457,7 @@ void radartask(void) {
 
 				sidx = add_index(t.oldest_index[j], k);
 
-				if (k == 1)
+				if (k == 1) // clearing old arrow
 					draw_arrow(t.ix[j][add_index(t.newest_index[j], -1)], 
 					t.iy[j][add_index(t.newest_index[j], -1)],
 					t.prvs_prdct_ix[j],  t.prvs_prdct_iy[j], BKG);
@@ -575,11 +576,15 @@ void update_computed_data(int i, float fix, float fiy, int status, int object) {
 	} else {
 		if (t.status[i] == ON) {
 			t.newest_index[i] = (t.newest_index[i] + 1) % MAX_TRACK_SAMPLES;
+			
+			// if oldest = newest it means that the array is full so the oldest
+			// index needs to be increased
 			if (t.newest_index[i] == t.oldest_index[i]) 
 				t.oldest_index[i] = (t.oldest_index[i] + 1) % MAX_TRACK_SAMPLES;
 			t.ix[i][t.newest_index[i]] = fix;
 			t.iy[i][t.newest_index[i]] = fiy;
 		} else {
+			// if array was empty it must be initialised
 			t.oldest_index[i] = 0;
 			t.newest_index[i] = 0;
 			t.ix[i][t.newest_index[i]] = fix;
@@ -655,9 +660,9 @@ void path_randomizer() {
 }
 
 //------------------------------------------------------------------------------
-// SAVE_MEASURES: used for the atomic copy of data contained in the m resource
+//	WAIT_FOR_DATA: wakes up when data from the scanning beam is taken
 //------------------------------------------------------------------------------
-void save_measures(int i, int* ix, int* iy, int* object, int* burst){
+void wait_for_data(int i, int* ix, int* iy, int* object, int* burst){
 
 	pthread_mutex_lock(&mutex);
 	pthread_cond_wait(&m.ptrt[i], &mutex);
@@ -703,7 +708,7 @@ void* tracking_thread(void* arg) {
 	int		sub_samples_x[10], sub_samples_y[10];
 
 	while(!end) {
-		save_measures(i, &ix, &iy, &object, &burst);
+		wait_for_data(i, &ix, &iy, &object, &burst);
 
 		if (object != 0) {
 			if (burst && nr_sub_samples < 10) {
