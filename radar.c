@@ -2,49 +2,49 @@
 // RADAR.C: 
 // TRACKING OBJECTS PROGRAM
 //------------------------------------------------------------
-#include <stdlib.h>    // include standard lib first
+#include <stdlib.h>		// include standard lib first
 #include <stdio.h>
 #include <pthread.h>
 #include <sched.h>
 #include <allegro.h>
 #include <math.h>
 #include <time.h>
-#include "ptask.h"    // a lib for periodic tasks
+#include "ptask.h"		// a lib for periodic tasks
 //------------------------------------------------------------------------------
 // GLOBAL CONSTANTS
 //------------------------------------------------------------------------------
 #define XWIN 864	// window x resolution
 #define YWIN 600	// window y resolution
-#define BKG 0	// background color
+#define BKG 0		// background color
 #define WHITE 15	// white color
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
-#define MAXT 25    // max number of balls tasks
-#define LEN 80    // max message length
-#define PER 20    // base period 
-#define PERRADAR 5    // base period
-#define PERRANDOMIZER 5000 //
-#define PI 3.1415926536    // pi greco
-#define RR 280.0    // radar display radius
-#define RRMIN  0    // min radius radar
-#define RRMAX  280    // max radius radar
+#define MAXT 25		// max number of balls tasks
+#define LEN 80		// max message length
+#define PER 20		// base period 
+#define PERRADAR 5  // base period
+#define PERRANDOMIZER 5000	// randomizer period
+#define PI 3.1415926536
+#define RR 280.0	// radar display radius
+#define RRMIN  0	// min radius radar
+#define RRMAX  280 	// max radius radar
 #define RSTEP  1 
 //------------------------------------------------------------------------------
 // BALL CONSTANTS
 //------------------------------------------------------------------------------
-#define MAX_BALLS 20 // max number of tracked balls
-#define MAX_TRACK_SAMPLES 10 // max number of sample per track
-#define VMIN -0.6 // min initial hor. speed
-#define VMAX 0.6 // max initial hor. speed
-#define AMIN -0.02 //  -0.2  min initial hor. speed
-#define AMAX 0.02 //   0.2 max initial hor. speed
-#define TSCALE 5 // time scale factor
-#define RMIN  1 // min radius
-#define RMAX  1 // max radius
+#define MAX_BALLS 20			// max number of tracked balls
+#define MAX_TRACK_SAMPLES 10	// max number of sample per track
+#define VMIN -0.6				// min initial hor. speed
+#define VMAX 0.6				// max initial hor. speed
+#define AMIN -0.02				// -0.2  min initial hor. speed
+#define AMAX 0.02				// 0.2 max initial hor. speed
+#define TSCALE 5				// time scale factor
+#define RMIN  1					// min radius
+#define RMAX  1					// max radius
 //------------------------------------------------------------------------------
 // TRACKING TASK CONSTANTS
 //------------------------------------------------------------------------------
-#define N 10    // max number of tracking measures per object
+#define N 10					// max number of tracking measures per object
 #define NOT_TRACKING 0
 #define TRACKING 1
 #define TRACKING_END_OF_BURST 2
@@ -57,20 +57,20 @@
 // GLOBAL VARIABLES
 //------------------------------------------------------------------------------
 
-int end = 0; // end flag
-int tasks = 0; // number of balls tasks
-int k_samples = 0; // selected at run time by user
+int	end = 0;		// end flag
+int tasks = 0;		// number of balls tasks
+int k_samples = 0;	// selected at run time by user
 
-	
-struct status { // ball structure 
-	int out_of_radar;
-	int c;  // color [1,15]
-	float r;    // radius (m)
+// ball structure
+struct status {  
+	int out_of_radar;			// out of radar flag
+	int c;						// color [1,15]
+	float r;    				// radius (m)
 	float x, y, x_old, y_old;   // ball coordinates
-	float vx;   // horizontal velocity (m/s)
-	float vy;   // vertical velocity (m/s)
-	float al;   // longitudal acceleration (m/s^2)
-	float ac;   // centripetal acceleration (m/s^2)
+	float vx;   				// horizontal velocity (m/s)
+	float vy;   				// vertical velocity (m/s)
+	float al;   				// longitudal acceleration (m/s^2)
+	float ac;   				// centripetal acceleration (m/s^2)
 };
 
 struct status ball[MAXT]; // balls status buffer
@@ -82,27 +82,30 @@ BITMAP *sky;
 int		width = YWIN;
 int     height = YWIN;
 
-struct misure_t { // contains newest interceptions           
+// contains newest interceptions
+struct misure_t {           
 	pthread_cond_t ptrt[MAX_BALLS];	// used to synchronize balls with radar 
 									// task tracking
-	int object[MAX_BALLS] ; //	used to indicate which balls are currently
-							// active
-	int ix[MAX_BALLS];  // last x coordinate intercepted by beam
-	int iy[MAX_BALLS];	// last y coordinate intercepted by beam
-	clock_t ct[MAX_BALLS];  // time of hit
-	int burst[MAX_BALLS];   // true when there are open burst
+	int object[MAX_BALLS];			// used to indicate which balls are
+									// currently active
+									
+	int ix[MAX_BALLS];  			// last x coordinate intercepted by beam
+	int iy[MAX_BALLS];				// last y coordinate intercepted by beam
+	clock_t ct[MAX_BALLS];  		// time of hit
+	int burst[MAX_BALLS];   		// true when there are open burst
 } m;
 
-struct track_t { // contains positions computed by tracking tasks           
-	int status[MAX_BALLS];	// can be ON or OFF
+// contains positions computed by tracking tasks
+struct track_t {            
+	int status[MAX_BALLS];			// can be ON or OFF
 	float ix[MAX_BALLS][MAX_TRACK_SAMPLES];
 	float iy[MAX_BALLS][MAX_TRACK_SAMPLES];
 	int oldest_index[MAX_BALLS];
 	int newest_index[MAX_BALLS];
-	float prvs_prdct_ix[MAX_BALLS];  // previous predicted ix
-	float prvs_prdct_iy[MAX_BALLS];  // previous predicted iy
-	float prdct_ix[MAX_BALLS];	// predicted ix
-	float prdct_iy[MAX_BALLS];	// predicted iy
+	float prvs_prdct_ix[MAX_BALLS];	// previous predicted ix
+	float prvs_prdct_iy[MAX_BALLS]; // previous predicted iy
+	float prdct_ix[MAX_BALLS];		// predicted ix
+	float prdct_iy[MAX_BALLS];		// predicted iy
 } t;
 
 pthread_mutex_t mutex;
@@ -114,7 +117,7 @@ pthread_condattr_t cattr;
 // INIT: initalises bitmap and condition variables
 //------------------------------------------------------------------------------
 void init(void) {
-	int i;
+	int		i;
 	allegro_init();
 	set_gfx_mode(GFX_AUTODETECT_WINDOWED, XWIN, YWIN, 0, 0);
 	clear_to_color(screen, BKG);
@@ -131,6 +134,7 @@ void init(void) {
 
 	pthread_condattr_init(&cattr);
 	pthread_mutex_init(&mutex, &attr);
+
 	for (i=0; i < MAX_BALLS; i++) {
 		m.object[i] = 0;
 		m.burst[i] = FALSE;
@@ -145,7 +149,7 @@ void init(void) {
 // FRAND: returns a random float in [xmi,xma)
 //------------------------------------------------------------------------------
 float frand(float xmi, float xma) {
-	float r;
+	float	r;
 	r = rand() / (float)RAND_MAX; //rand in [0,1)
 	return xmi + (xma - xmi) * r;
 }
@@ -161,8 +165,8 @@ double distance(int x1, int y1, int x2, int y2) {
 // INIT_BALL: Initialises balls position and speed
 //------------------------------------------------------------------------------
 void init_ball(int i, float dt) {
-	float alpha;
-	float x, y;
+	float	alpha;
+	float	x, y;
 	ball[i].out_of_radar = FALSE;
 	ball[i].c = 2 + i % 14; // color in [2, 15]
 	ball[i].r = frand(RMIN, RMAX);
@@ -189,8 +193,9 @@ void init_ball(int i, float dt) {
 // DRAW_BALL: draw ball i in graphic coordinates
 //------------------------------------------------------------------------------
 void draw_ball(int i) {
-	int x, y;
-	int x_old, y_old;
+	int		x, y;
+	int		x_old, y_old;
+
 	x =  ball[i].x;
 	y = YWIN - ball[i].y;
 	x_old = ball[i].x_old;
@@ -203,7 +208,8 @@ void draw_ball(int i) {
 // CLEAR_BALL: clears old balls' coordinates
 //------------------------------------------------------------------------------
 void clear_ball(int i) {
-	int x_old, y_old;
+	int		x_old, y_old;
+
 	x_old = ball[i].x_old;
 	y_old = YWIN - ball[i].y_old;
 	circlefill(sky, x_old, y_old, ball[i].r, BKG);
@@ -224,13 +230,15 @@ void draw_arrow(int x1, int y1, int x2, int y2, int c){
 // passed
 //------------------------------------------------------------------------------
 void update_ball_position(int i, float dt){
-	double ax, ay;		// acceleration
-	double vel_modulus;
-	double vel_modulus_after;
-	double alpha;		//angle
+	double		ax, ay;		// acceleration
+	double		vel_modulus;
+	double		vel_modulus_after;
+	double		alpha;		//angle
 	vel_modulus = sqrt(ball[i].vx * ball[i].vx + ball[i].vy * ball[i].vy);
 	alpha = asin(ball[i].vy/vel_modulus); //direction of speed vector
-	ax = ball[i].ac * cos(alpha + PI/2); // banking
+	
+	// banking
+	ax = ball[i].ac * cos(alpha + PI/2); 
 	ay = ball[i].ac * sin(alpha + PI/2);
 
 	ball[i].vx += ax * dt;
@@ -262,10 +270,10 @@ void update_ball_position(int i, float dt){
 // BALL_TASK: task that handles all the balls movement after getting the period
 //------------------------------------------------------------------------------
 void ball_task() {
-	int i; 		// task index
+	int		i; 		// task index
+	float	dt; 	// integration interval
 	i = ptask_get_index();
-	float dt; 		// integration interval
-	dt = TSCALE*(float) ptask_get_period(i, MILLI)/1000;
+	dt = TSCALE * (float)ptask_get_period(i, MILLI) / 1000;
 
 	init_ball(i, dt);
 
@@ -281,8 +289,9 @@ void ball_task() {
 // burst as false
 //------------------------------------------------------------------------------
 void burst_check(clock_t scanning_time, int i) {
-	long elapsed_clocks;	// number of clocks since the last measure
-	double cpu_time_elapsed;	// elapsed time in seconds
+	long	elapsed_clocks;		// number of clocks since the last measure
+	double	cpu_time_elapsed;	// elapsed time in seconds
+	
 	if (m.object[i] != 0) {
 		elapsed_clocks = scanning_time - m.ct[i];
 		// posix defines CLOCKS_PER_SEC as one million regardless of hardware
@@ -333,12 +342,12 @@ void assign_measure(int lx, int ly, clock_t scanning_time, int target, int j){
 // coordinates of the starting point of the line and a is the angle.
 //------------------------------------------------------------------------------
 void line_scan(int x0, int y0, int a) {
-	int lx,ly;	// line coordinates
-	int d;	
-	int target;	// color to get using getpixel
-	int i, j;	// i used to loop through the balls, while j is used to 
-				// register the first known index
-	float alpha;
+	int		lx,ly;	// line coordinates
+	int		d;	
+	int		target;	// color to get using getpixel
+	int		i, j;	// i used to loop through the balls, while j is used to 
+					// register the first known index
+	float 	alpha;	// angle in radiants
 	alpha = a * PI / 1800;
 	clock_t scanning_time = clock();
 
@@ -387,7 +396,8 @@ int add_index(int a, int k) {
 // print
 //------------------------------------------------------------------------------
 int find_ball_sample(int j){
-	int samples_to_display;
+	int		samples_to_display;
+	
 	samples_to_display = t.newest_index[j] - t.oldest_index[j] + 1;
 	
 	if (samples_to_display <= 0) 
@@ -426,13 +436,13 @@ void rotate_radar(int inc, int* a, float* alpha){
 // ball positions
 //------------------------------------------------------------------------------
 void radartask(void) {
-	int i, k; // task index i and sample index k
-	int a = 0; // scanning direction (deg*10)
-	int j; // array index
-	int sidx;   // sample index
-	int samples_to_display;
-	int radius;
-	float alpha = 0;
+	int		i, k;	// task index i and sample index k
+	int		a = 0;	// scanning direction (deg*10)
+	int		j;		// array index
+	int		sidx;	// sample index
+	int		samples_to_display;
+	int		radius;
+	float	alpha = 0;
 
 	i = ptask_get_index();
 	while (!end) {
@@ -488,7 +498,7 @@ void radartask(void) {
 // GET_KEYCODES: gets ascii code from pressed key
 //------------------------------------------------------------------------------
 void get_keycodes(char *scan, char *ascii) {
-	int k;
+	int	k;
 	k = readkey();  
 	*ascii = k;     
 	*scan = k >> 8; 
@@ -557,8 +567,9 @@ void compute_predicted_data(int i) {
 // compute_predicted_data
 //------------------------------------------------------------------------------
 void update_computed_data(int i, float fix, float fiy, int status, int object) {
-	float pix, piy;
-	char s[LEN];
+	float	pix, piy;	// will contain predicted data
+	char	s[LEN];		// buffer for text to be printed on screen
+	
 	if (status == NOT_TRACKING) {
 		t.status[i] = SHUTTING_DOWN;
 	} else {
@@ -594,8 +605,8 @@ void update_computed_data(int i, float fix, float fiy, int status, int object) {
 // varying the balls'acceleration.
 //------------------------------------------------------------------------------
 void path_randomizer() {
-	int i, k, r;
-	float vel_modulus;
+	int		i, k, r;		// i:ptask index k: used as ball index r: rand
+	float	vel_modulus;	// modulus of ball speed
 	i = ptask_get_index();
 	
 	while(!end) {
@@ -605,11 +616,8 @@ void path_randomizer() {
 				 * ball[k].vy);
 				r = rand()%5;
 				switch(r) {
-					case 0:
-						ball[k].al = 0;
-						ball[k].ac = 0;
-						break;
-					case 1:
+					case 0:	// in 2 out of 5 cases the ball does not change
+					case 1: // its acceleration
 						ball[k].al = 0;
 						ball[k].ac = 0;
 						break;		
@@ -667,7 +675,7 @@ void save_measures(int i, int* ix, int* iy, int* object, int* burst){
 //------------------------------------------------------------------------------
 void compute_mean_positions(int *max_samples, int* ssx, int* ssy, float* fix,
  float* fiy){
-	int k;	// samples index
+	int	k;		// samples index
 	*fix = 0.;	// sample x coordinate
 	*fiy = 0.;	// sample y coordinate
 	for (k = 0; k < *max_samples; k++) {
@@ -684,14 +692,15 @@ void compute_mean_positions(int *max_samples, int* ssx, int* ssy, float* fix,
 // it after it has calculated the mean position using all samples 
 //------------------------------------------------------------------------------
 void* tracking_thread(void* arg) {
-	int i = *(int*)arg;
-	int status = NOT_TRACKING;
-	int object;		// colour of tracked object
-	int ix, iy;
-	float fix, fiy;
-	int burst;
-	int nr_sub_samples = 0;
-	int sub_samples_x[10], sub_samples_y[10];
+	int		i = *(int*)arg;
+	int		object;		// colour of tracked object
+	int		ix, iy;
+	float	fix, fiy;
+	int		burst;		// used to signal if we are inside a burst
+	
+	int		status = NOT_TRACKING;
+	int		nr_sub_samples = 0;
+	int		sub_samples_x[10], sub_samples_y[10];
 
 	while(!end) {
 		save_measures(i, &ix, &iy, &object, &burst);
@@ -718,6 +727,7 @@ void* tracking_thread(void* arg) {
 			compute_mean_positions(&nr_sub_samples, sub_samples_x,
 			 sub_samples_y, &fix, &fiy);
 			nr_sub_samples = 0;
+			
 			// updating shared area for display
 			update_computed_data(i, fix,fiy, status, object);
 		}
@@ -730,8 +740,7 @@ void* tracking_thread(void* arg) {
 // samples the program has to take before predicting the next position 
 //------------------------------------------------------------------------------
 void handles_i(void){
-	char str[5];
-	char ss[24];
+	char str[5], ss[24];	// str: used for scanf buffer, ss: used for output
 	textout_ex(buffer, font, "Enter k:          ", 10, 50, 2, BKG);
 	textout_ex(buffer, font, "                ", 10, 60, 2, BKG);
 	get_string(str, 80, 50, 3, 0);
@@ -762,10 +771,10 @@ void handles_spaces(void){
 }
 
 int main(void) {
-	int j;	// loop indexes
-	char scan;	//ascii character for scan ball
-	pthread_attr_t a;
-	pthread_t p;
+	int				j;		// loop indexes
+	char			scan;	//ascii character for scan ball
+	pthread_attr_t	a;
+	pthread_t		p;
 
 	init();
 	pthread_attr_init(&a);
