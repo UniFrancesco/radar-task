@@ -1,6 +1,6 @@
 # radar-task
 Repository for University project of the Real-Time Embedded Systems course.  
-The software is intended to simulate the working of a naval radar, by using randomically moving balls on a flat space. The
+The software is intended to simulate the working of a naval radar, by using randomly moving balls on a flat space. The
 user can pass a number between 2 and 5 as input parameter, which serves the purpose to dictate the number of samples that the
 radar has to take before starting to predict the next position of the balls.
 
